@@ -13,6 +13,7 @@ class SpotifyDataReader {
         // Constants matching C# version
         this.payPerListenLow = 0.003;
         this.payPerListenHigh = 0.005;
+        this.artistShareOfStreaming = 0.20; // Artists get ~20% of label's streaming revenue
         
         // Currency settings
         this.currency = 'GBP'; // 'GBP' or 'USD'
@@ -294,11 +295,17 @@ class SpotifyDataReader {
             const lowUSD = this.artistPlaycounts[index] * this.payPerListenLow;
             const highUSD = this.artistPlaycounts[index] * this.payPerListenHigh;
             
+            // Calculate label earnings and artist share (20% of label)
+            const lowLabelEarning = this.currency === 'GBP' ? lowUSD / this.exchangeRate : lowUSD;
+            const highLabelEarning = this.currency === 'GBP' ? highUSD / this.exchangeRate : highUSD;
+            
             return {
                 name,
                 plays: this.artistPlaycounts[index],
-                lowEstimate: this.currency === 'GBP' ? lowUSD / this.exchangeRate : lowUSD,
-                highEstimate: this.currency === 'GBP' ? highUSD / this.exchangeRate : highUSD
+                lowEstimate: lowLabelEarning * this.artistShareOfStreaming,
+                highEstimate: highLabelEarning * this.artistShareOfStreaming,
+                lowLabelEstimate: lowLabelEarning,
+                highLabelEstimate: highLabelEarning
             };
         });
         
@@ -313,6 +320,11 @@ class SpotifyDataReader {
      */
     calculateCounts() {
         let output = '';
+        
+        // Reset counts before calculating
+        this.mostPlayedArtistCount = 0;
+        this.secondMostPlayedArtistCount = 0;
+        this.thirdMostPlayedArtistCount = 0;
         
         // Find most played artist
         let mostPlayedIndex = -1;
@@ -357,11 +369,13 @@ class SpotifyDataReader {
         const endYear = this.latestYear || new Date().getFullYear();
         const spotifyPayments = this.calculateSpotifyPayments(startYear, endYear);
         
-        // Calculate top artist payments
+        // Calculate top artist payments (label and artist share)
         const topArtistLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
         const topArtistHighUSD = this.mostPlayedArtistCount * this.payPerListenHigh;
-        const topArtistLow = this.currency === 'GBP' ? topArtistLowUSD / this.exchangeRate : topArtistLowUSD;
-        const topArtistHigh = this.currency === 'GBP' ? topArtistHighUSD / this.exchangeRate : topArtistHighUSD;
+        const topArtistLabelLow = this.currency === 'GBP' ? topArtistLowUSD / this.exchangeRate : topArtistLowUSD;
+        const topArtistLabelHigh = this.currency === 'GBP' ? topArtistHighUSD / this.exchangeRate : topArtistHighUSD;
+        const topArtistLow = topArtistLabelLow * this.artistShareOfStreaming;
+        const topArtistHigh = topArtistLabelHigh * this.artistShareOfStreaming;
         
         // Store summary data for UI display
         this.summaryStats = {
@@ -373,50 +387,75 @@ class SpotifyDataReader {
             topArtist: this.mostPlayedArtist,
             topArtistPlays: this.mostPlayedArtistCount,
             topArtistLow: topArtistLow,
-            topArtistHigh: topArtistHigh
+            topArtistHigh: topArtistHigh,
+            topArtistLabelLow: topArtistLabelLow,
+            topArtistLabelHigh: topArtistLabelHigh
         };
         
-        // Output money to artists
+        // Output money to labels and artists
         const currency = this.getCurrencySymbol();
-        const lowEstimateConverted = this.currency === 'GBP' ? (validListens * this.payPerListenLow) / this.exchangeRate : validListens * this.payPerListenLow;
-        const highEstimateConverted = this.currency === 'GBP' ? (validListens * this.payPerListenHigh) / this.exchangeRate : validListens * this.payPerListenHigh;
+        const lowLabelEstimate = this.currency === 'GBP' ? (validListens * this.payPerListenLow) / this.exchangeRate : validListens * this.payPerListenLow;
+        const highLabelEstimate = this.currency === 'GBP' ? (validListens * this.payPerListenHigh) / this.exchangeRate : validListens * this.payPerListenHigh;
+        const lowArtistEstimate = lowLabelEstimate * this.artistShareOfStreaming;
+        const highArtistEstimate = highLabelEstimate * this.artistShareOfStreaming;
         
-        output += `Money to artists over ${validListens} listens (low estimate ${currency}${(this.payPerListenLow / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${lowEstimateConverted.toFixed(2)}\n`;
-        output += `Money to artists over ${validListens} listens (high estimate ${currency}${(this.payPerListenHigh / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${highEstimateConverted.toFixed(2)}\n\n`;
+        output += `=== STREAMING REVENUE ===\n`;
+        output += `Money to labels over ${validListens} listens:\n`;
+        output += `  Low estimate (${currency}${(this.payPerListenLow / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${lowLabelEstimate.toFixed(2)}\n`;
+        output += `  High estimate (${currency}${(this.payPerListenHigh / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${highLabelEstimate.toFixed(2)}\n`;
+        output += `\nMoney to artists (20% of label revenue):\n`;
+        output += `  Low estimate: ${currency}${lowArtistEstimate.toFixed(2)}\n`;
+        output += `  High estimate: ${currency}${highArtistEstimate.toFixed(2)}\n\n`;
         
-        console.log(`Money to artists over ${validListens} listens (low estimate): ${currency}${lowEstimateConverted.toFixed(2)}`);
-        console.log(`Money to artists over ${validListens} listens (high estimate): ${currency}${highEstimateConverted.toFixed(2)}`);
+        console.log(`Money to labels over ${validListens} listens (low estimate): ${currency}${lowLabelEstimate.toFixed(2)}`);
+        console.log(`Money to artists over ${validListens} listens (low estimate): ${currency}${lowArtistEstimate.toFixed(2)}`);
         
-        // Output top artists
-        const mostPlayedLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
-        const mostPlayedHighUSD = this.mostPlayedArtistCount * this.payPerListenHigh;
-        const mostPlayedLow = this.currency === 'GBP' ? mostPlayedLowUSD / this.exchangeRate : mostPlayedLowUSD;
-        const mostPlayedHigh = this.currency === 'GBP' ? mostPlayedHighUSD / this.exchangeRate : mostPlayedHighUSD;
-        output += `Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, paid ${currency}${mostPlayedLow.toFixed(2)} - ${currency}${mostPlayedHigh.toFixed(2)}\n`;
-        console.log(`Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, paid ${currency}${mostPlayedLow.toFixed(2)} - ${currency}${mostPlayedHigh.toFixed(2)}`);
+        // Output top artists (both label and artist earnings)
+        const mostPlayedLabelLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
+        const mostPlayedLabelHighUSD = this.mostPlayedArtistCount * this.payPerListenHigh;
+        const mostPlayedLabelLow = this.currency === 'GBP' ? mostPlayedLabelLowUSD / this.exchangeRate : mostPlayedLabelLowUSD;
+        const mostPlayedLabelHigh = this.currency === 'GBP' ? mostPlayedLabelHighUSD / this.exchangeRate : mostPlayedLabelHighUSD;
+        const mostPlayedLow = mostPlayedLabelLow * this.artistShareOfStreaming;
+        const mostPlayedHigh = mostPlayedLabelHigh * this.artistShareOfStreaming;
+        output += `Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}\n`;
+        output += `  Label earned: ${currency}${mostPlayedLabelLow.toFixed(2)} - ${currency}${mostPlayedLabelHigh.toFixed(2)}\n`;
+        output += `  Artist earned (20%): ${currency}${mostPlayedLow.toFixed(2)} - ${currency}${mostPlayedHigh.toFixed(2)}\n`;
+        console.log(`Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, artist earned ${currency}${mostPlayedLow.toFixed(2)} - ${currency}${mostPlayedHigh.toFixed(2)}`);
         
-        const secondPlayedLowUSD = this.secondMostPlayedArtistCount * this.payPerListenLow;
-        const secondPlayedHighUSD = this.secondMostPlayedArtistCount * this.payPerListenHigh;
-        const secondPlayedLow = this.currency === 'GBP' ? secondPlayedLowUSD / this.exchangeRate : secondPlayedLowUSD;
-        const secondPlayedHigh = this.currency === 'GBP' ? secondPlayedHighUSD / this.exchangeRate : secondPlayedHighUSD;
-        output += `Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, paid ${currency}${secondPlayedLow.toFixed(2)} - ${currency}${secondPlayedHigh.toFixed(2)}\n`;
-        console.log(`Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, paid ${currency}${secondPlayedLow.toFixed(2)} - ${currency}${secondPlayedHigh.toFixed(2)}`);
+        const secondPlayedLabelLowUSD = this.secondMostPlayedArtistCount * this.payPerListenLow;
+        const secondPlayedLabelHighUSD = this.secondMostPlayedArtistCount * this.payPerListenHigh;
+        const secondPlayedLabelLow = this.currency === 'GBP' ? secondPlayedLabelLowUSD / this.exchangeRate : secondPlayedLabelLowUSD;
+        const secondPlayedLabelHigh = this.currency === 'GBP' ? secondPlayedLabelHighUSD / this.exchangeRate : secondPlayedLabelHighUSD;
+        const secondPlayedLow = secondPlayedLabelLow * this.artistShareOfStreaming;
+        const secondPlayedHigh = secondPlayedLabelHigh * this.artistShareOfStreaming;
+        output += `Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}\n`;
+        output += `  Label earned: ${currency}${secondPlayedLabelLow.toFixed(2)} - ${currency}${secondPlayedLabelHigh.toFixed(2)}\n`;
+        output += `  Artist earned (20%): ${currency}${secondPlayedLow.toFixed(2)} - ${currency}${secondPlayedHigh.toFixed(2)}\n`;
+        console.log(`Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, artist earned ${currency}${secondPlayedLow.toFixed(2)} - ${currency}${secondPlayedHigh.toFixed(2)}`);
         
-        const thirdPlayedLowUSD = this.thirdMostPlayedArtistCount * this.payPerListenLow;
-        const thirdPlayedHighUSD = this.thirdMostPlayedArtistCount * this.payPerListenHigh;
-        const thirdPlayedLow = this.currency === 'GBP' ? thirdPlayedLowUSD / this.exchangeRate : thirdPlayedLowUSD;
-        const thirdPlayedHigh = this.currency === 'GBP' ? thirdPlayedHighUSD / this.exchangeRate : thirdPlayedHighUSD;
-        output += `Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, paid ${currency}${thirdPlayedLow.toFixed(2)} - ${currency}${thirdPlayedHigh.toFixed(2)}\n\n`;
-        console.log(`Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, paid ${currency}${thirdPlayedLow.toFixed(2)} - ${currency}${thirdPlayedHigh.toFixed(2)}`);
+        const thirdPlayedLabelLowUSD = this.thirdMostPlayedArtistCount * this.payPerListenLow;
+        const thirdPlayedLabelHighUSD = this.thirdMostPlayedArtistCount * this.payPerListenHigh;
+        const thirdPlayedLabelLow = this.currency === 'GBP' ? thirdPlayedLabelLowUSD / this.exchangeRate : thirdPlayedLabelLowUSD;
+        const thirdPlayedLabelHigh = this.currency === 'GBP' ? thirdPlayedLabelHighUSD / this.exchangeRate : thirdPlayedLabelHighUSD;
+        const thirdPlayedLow = thirdPlayedLabelLow * this.artistShareOfStreaming;
+        const thirdPlayedHigh = thirdPlayedLabelHigh * this.artistShareOfStreaming;
+        output += `Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}\n`;
+        output += `  Label earned: ${currency}${thirdPlayedLabelLow.toFixed(2)} - ${currency}${thirdPlayedLabelHigh.toFixed(2)}\n`;
+        output += `  Artist earned (20%): ${currency}${thirdPlayedLow.toFixed(2)} - ${currency}${thirdPlayedHigh.toFixed(2)}\n\n`;
+        console.log(`Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, artist earned ${currency}${thirdPlayedLow.toFixed(2)} - ${currency}${thirdPlayedHigh.toFixed(2)}`);
         
         // Average listens per artist
         const averageListens = validListens / this.artistNames.length;
-        const avgLowUSD = averageListens * this.payPerListenLow;
-        const avgHighUSD = averageListens * this.payPerListenHigh;
-        const avgLow = this.currency === 'GBP' ? avgLowUSD / this.exchangeRate : avgLowUSD;
-        const avgHigh = this.currency === 'GBP' ? avgHighUSD / this.exchangeRate : avgHighUSD;
-        output += `Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, paying average ${currency}${avgLow.toFixed(2)} - ${currency}${avgHigh.toFixed(2)}\n\n`;
-        console.log(`Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, paying average ${currency}${avgLow.toFixed(2)} - ${currency}${avgHigh.toFixed(2)}`);
+        const avgLabelLowUSD = averageListens * this.payPerListenLow;
+        const avgLabelHighUSD = averageListens * this.payPerListenHigh;
+        const avgLabelLow = this.currency === 'GBP' ? avgLabelLowUSD / this.exchangeRate : avgLabelLowUSD;
+        const avgLabelHigh = this.currency === 'GBP' ? avgLabelHighUSD / this.exchangeRate : avgLabelHighUSD;
+        const avgLow = avgLabelLow * this.artistShareOfStreaming;
+        const avgHigh = avgLabelHigh * this.artistShareOfStreaming;
+        output += `Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}\n`;
+        output += `  Average label earnings: ${currency}${avgLabelLow.toFixed(2)} - ${currency}${avgLabelHigh.toFixed(2)}\n`;
+        output += `  Average artist earnings (20%): ${currency}${avgLow.toFixed(2)} - ${currency}${avgHigh.toFixed(2)}\n\n`;
+        console.log(`Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, average artist earnings ${currency}${avgLow.toFixed(2)} - ${currency}${avgHigh.toFixed(2)}`);
         
         // Calculate realistic Spotify payments based on historical pricing
         // Determine subscription period from data (2009-2025 based on file names)
@@ -801,8 +840,8 @@ class UIController {
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">#</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist</th>
                             <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Plays</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Low Estimate</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">High Estimate</th>
+                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist Low (20%)</th>
+                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist High (20%)</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
