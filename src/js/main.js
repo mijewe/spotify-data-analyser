@@ -14,6 +14,10 @@ class SpotifyDataReader {
         this.payPerListenLow = 0.003;
         this.payPerListenHigh = 0.005;
         
+        // Currency settings
+        this.currency = 'GBP'; // 'GBP' or 'USD'
+        this.exchangeRate = 1.27; // GBP to USD rate (approximate)
+        
         // Historical Spotify pricing data (based on research)
         // Spotify Premium Individual pricing history
         this.pricingHistory = [
@@ -37,6 +41,38 @@ class SpotifyDataReader {
     }
 
     /**
+     * Set currency preference
+     */
+    setCurrency(currency) {
+        this.currency = currency;
+        localStorage.setItem('spotify_currency', currency);
+    }
+
+    /**
+     * Get currency preference
+     */
+    getCurrency() {
+        return this.currency;
+    }
+
+    /**
+     * Get currency symbol
+     */
+    getCurrencySymbol() {
+        return this.currency === 'GBP' ? '£' : '$';
+    }
+
+    /**
+     * Convert GBP to selected currency
+     */
+    convertCurrency(amount) {
+        if (this.currency === 'USD') {
+            return amount * this.exchangeRate;
+        }
+        return amount;
+    }
+
+    /**
      * Save processed data to local storage
      */
     saveToLocalStorage() {
@@ -46,6 +82,8 @@ class SpotifyDataReader {
                 artistPlaycounts: this.artistPlaycounts,
                 blankTracks: this.blankTracks,
                 totalTracks: this.listens.length,
+                earliestYear: this.earliestYear,
+                latestYear: this.latestYear,
                 mostPlayedArtist: this.mostPlayedArtist,
                 mostPlayedArtistCount: this.mostPlayedArtistCount,
                 secondMostPlayedArtist: this.secondMostPlayedArtist,
@@ -79,6 +117,8 @@ class SpotifyDataReader {
             this.artistNames = data.artistNames;
             this.artistPlaycounts = data.artistPlaycounts;
             this.blankTracks = data.blankTracks;
+            this.earliestYear = data.earliestYear || 2009;
+            this.latestYear = data.latestYear || new Date().getFullYear();
             this.mostPlayedArtist = data.mostPlayedArtist;
             this.mostPlayedArtistCount = data.mostPlayedArtistCount;
             this.secondMostPlayedArtist = data.secondMostPlayedArtist;
@@ -151,11 +191,24 @@ class SpotifyDataReader {
         this.artistNames = [];
         this.artistPlaycounts = [];
         this.blankTracks = 0;
+        this.earliestYear = null;
+        this.latestYear = null;
         
         const totalTracks = this.listens.length;
         
         for (let i = 0; i < totalTracks; i++) {
             const listen = this.listens[i];
+            
+            // Track earliest and latest years
+            if (listen.ts) {
+                const year = new Date(listen.ts).getFullYear();
+                if (this.earliestYear === null || year < this.earliestYear) {
+                    this.earliestYear = year;
+                }
+                if (this.latestYear === null || year > this.latestYear) {
+                    this.latestYear = year;
+                }
+            }
             
             if (listen.master_metadata_album_artist_name && 
                 listen.master_metadata_album_artist_name !== '') {
@@ -183,7 +236,12 @@ class SpotifyDataReader {
             onProgress(totalTracks, totalTracks);
         }
         
+        // Default to current year if we couldn't determine from data
+        if (!this.earliestYear) this.earliestYear = 2009;
+        if (!this.latestYear) this.latestYear = new Date().getFullYear();
+        
         console.log('Done!');
+        console.log(`Data range: ${this.earliestYear} - ${this.latestYear}`);
     }
 
     /**
@@ -232,12 +290,17 @@ class SpotifyDataReader {
      * Get top N artists sorted by play count
      */
     getTopArtists(n = 10) {
-        const artists = this.artistNames.map((name, index) => ({
-            name,
-            plays: this.artistPlaycounts[index],
-            lowEstimate: this.artistPlaycounts[index] * this.payPerListenLow,
-            highEstimate: this.artistPlaycounts[index] * this.payPerListenHigh
-        }));
+        const artists = this.artistNames.map((name, index) => {
+            const lowUSD = this.artistPlaycounts[index] * this.payPerListenLow;
+            const highUSD = this.artistPlaycounts[index] * this.payPerListenHigh;
+            
+            return {
+                name,
+                plays: this.artistPlaycounts[index],
+                lowEstimate: this.currency === 'GBP' ? lowUSD / this.exchangeRate : lowUSD,
+                highEstimate: this.currency === 'GBP' ? highUSD / this.exchangeRate : highUSD
+            };
+        });
         
         // Sort by plays descending
         artists.sort((a, b) => b.plays - a.plays);
@@ -289,12 +352,16 @@ class SpotifyDataReader {
         const lowEstimate = validListens * this.payPerListenLow;
         const highEstimate = validListens * this.payPerListenHigh;
         
-        // Calculate Spotify payments
-        const spotifyPayments = this.calculateSpotifyPayments(2009, 2025);
+        // Calculate Spotify payments using detected or default years
+        const startYear = this.earliestYear || 2009;
+        const endYear = this.latestYear || new Date().getFullYear();
+        const spotifyPayments = this.calculateSpotifyPayments(startYear, endYear);
         
         // Calculate top artist payments
-        const topArtistLow = this.mostPlayedArtistCount * this.payPerListenLow;
-        const topArtistHigh = this.mostPlayedArtistCount * this.payPerListenHigh;
+        const topArtistLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
+        const topArtistHighUSD = this.mostPlayedArtistCount * this.payPerListenHigh;
+        const topArtistLow = this.currency === 'GBP' ? topArtistLowUSD / this.exchangeRate : topArtistLowUSD;
+        const topArtistHigh = this.currency === 'GBP' ? topArtistHighUSD / this.exchangeRate : topArtistHighUSD;
         
         // Store summary data for UI display
         this.summaryStats = {
@@ -310,42 +377,54 @@ class SpotifyDataReader {
         };
         
         // Output money to artists
-        output += `Money to artists over ${validListens} listens (low estimate $0.003 per listen): $${lowEstimate.toFixed(2)}\n`;
-        output += `Money to artists over ${validListens} listens (high estimate $0.005 per listen): $${highEstimate.toFixed(2)}\n\n`;
+        const currency = this.getCurrencySymbol();
+        const lowEstimateConverted = this.currency === 'GBP' ? (validListens * this.payPerListenLow) / this.exchangeRate : validListens * this.payPerListenLow;
+        const highEstimateConverted = this.currency === 'GBP' ? (validListens * this.payPerListenHigh) / this.exchangeRate : validListens * this.payPerListenHigh;
         
-        console.log(`Money to artists over ${validListens} listens (low estimate $0.003 per listen): $${lowEstimate.toFixed(2)}`);
-        console.log(`Money to artists over ${validListens} listens (high estimate $0.005 per listen): $${highEstimate.toFixed(2)}`);
+        output += `Money to artists over ${validListens} listens (low estimate ${currency}${(this.payPerListenLow / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${lowEstimateConverted.toFixed(2)}\n`;
+        output += `Money to artists over ${validListens} listens (high estimate ${currency}${(this.payPerListenHigh / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${highEstimateConverted.toFixed(2)}\n\n`;
+        
+        console.log(`Money to artists over ${validListens} listens (low estimate): ${currency}${lowEstimateConverted.toFixed(2)}`);
+        console.log(`Money to artists over ${validListens} listens (high estimate): ${currency}${highEstimateConverted.toFixed(2)}`);
         
         // Output top artists
-        const mostPlayedLow = this.mostPlayedArtistCount * this.payPerListenLow;
-        const mostPlayedHigh = this.mostPlayedArtistCount * this.payPerListenHigh;
-        output += `Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, paid $${mostPlayedLow.toFixed(2)} - $${mostPlayedHigh.toFixed(2)}\n`;
-        console.log(`Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, paid $${mostPlayedLow.toFixed(2)} - $${mostPlayedHigh.toFixed(2)}`);
+        const mostPlayedLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
+        const mostPlayedHighUSD = this.mostPlayedArtistCount * this.payPerListenHigh;
+        const mostPlayedLow = this.currency === 'GBP' ? mostPlayedLowUSD / this.exchangeRate : mostPlayedLowUSD;
+        const mostPlayedHigh = this.currency === 'GBP' ? mostPlayedHighUSD / this.exchangeRate : mostPlayedHighUSD;
+        output += `Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, paid ${currency}${mostPlayedLow.toFixed(2)} - ${currency}${mostPlayedHigh.toFixed(2)}\n`;
+        console.log(`Most played artist at ${this.mostPlayedArtistCount} plays: ${this.mostPlayedArtist}, paid ${currency}${mostPlayedLow.toFixed(2)} - ${currency}${mostPlayedHigh.toFixed(2)}`);
         
-        const secondPlayedLow = this.secondMostPlayedArtistCount * this.payPerListenLow;
-        const secondPlayedHigh = this.secondMostPlayedArtistCount * this.payPerListenHigh;
-        output += `Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, paid $${secondPlayedLow.toFixed(2)} - $${secondPlayedHigh.toFixed(2)}\n`;
-        console.log(`Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, paid $${secondPlayedLow.toFixed(2)} - $${secondPlayedHigh.toFixed(2)}`);
+        const secondPlayedLowUSD = this.secondMostPlayedArtistCount * this.payPerListenLow;
+        const secondPlayedHighUSD = this.secondMostPlayedArtistCount * this.payPerListenHigh;
+        const secondPlayedLow = this.currency === 'GBP' ? secondPlayedLowUSD / this.exchangeRate : secondPlayedLowUSD;
+        const secondPlayedHigh = this.currency === 'GBP' ? secondPlayedHighUSD / this.exchangeRate : secondPlayedHighUSD;
+        output += `Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, paid ${currency}${secondPlayedLow.toFixed(2)} - ${currency}${secondPlayedHigh.toFixed(2)}\n`;
+        console.log(`Second most played artist at ${this.secondMostPlayedArtistCount} plays: ${this.secondMostPlayedArtist}, paid ${currency}${secondPlayedLow.toFixed(2)} - ${currency}${secondPlayedHigh.toFixed(2)}`);
         
-        const thirdPlayedLow = this.thirdMostPlayedArtistCount * this.payPerListenLow;
-        const thirdPlayedHigh = this.thirdMostPlayedArtistCount * this.payPerListenHigh;
-        output += `Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, paid $${thirdPlayedLow.toFixed(2)} - $${thirdPlayedHigh.toFixed(2)}\n\n`;
-        console.log(`Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, paid $${thirdPlayedLow.toFixed(2)} - $${thirdPlayedHigh.toFixed(2)}`);
+        const thirdPlayedLowUSD = this.thirdMostPlayedArtistCount * this.payPerListenLow;
+        const thirdPlayedHighUSD = this.thirdMostPlayedArtistCount * this.payPerListenHigh;
+        const thirdPlayedLow = this.currency === 'GBP' ? thirdPlayedLowUSD / this.exchangeRate : thirdPlayedLowUSD;
+        const thirdPlayedHigh = this.currency === 'GBP' ? thirdPlayedHighUSD / this.exchangeRate : thirdPlayedHighUSD;
+        output += `Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, paid ${currency}${thirdPlayedLow.toFixed(2)} - ${currency}${thirdPlayedHigh.toFixed(2)}\n\n`;
+        console.log(`Third most played artist at ${this.thirdMostPlayedArtistCount} plays: ${this.thirdMostPlayedArtist}, paid ${currency}${thirdPlayedLow.toFixed(2)} - ${currency}${thirdPlayedHigh.toFixed(2)}`);
         
         // Average listens per artist
         const averageListens = validListens / this.artistNames.length;
-        const avgLow = averageListens * this.payPerListenLow;
-        const avgHigh = averageListens * this.payPerListenHigh;
-        output += `Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, paying average $${avgLow.toFixed(2)} - $${avgHigh.toFixed(2)}\n\n`;
-        console.log(`Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, paying average $${avgLow.toFixed(2)} - $${avgHigh.toFixed(2)}`);
+        const avgLowUSD = averageListens * this.payPerListenLow;
+        const avgHighUSD = averageListens * this.payPerListenHigh;
+        const avgLow = this.currency === 'GBP' ? avgLowUSD / this.exchangeRate : avgLowUSD;
+        const avgHigh = this.currency === 'GBP' ? avgHighUSD / this.exchangeRate : avgHighUSD;
+        output += `Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, paying average ${currency}${avgLow.toFixed(2)} - ${currency}${avgHigh.toFixed(2)}\n\n`;
+        console.log(`Average listens across ${this.artistNames.length} artists: ${averageListens.toFixed(2)}, paying average ${currency}${avgLow.toFixed(2)} - ${currency}${avgHigh.toFixed(2)}`);
         
         // Calculate realistic Spotify payments based on historical pricing
         // Determine subscription period from data (2009-2025 based on file names)
-        const currency = '£'; // Using GBP as per original
+        const convertedTotal = this.convertCurrency(spotifyPayments.totalPaid);
         
         output += `\n=== SPOTIFY SUBSCRIPTION COST (Historical Pricing) ===\n`;
         output += `Period: 2009 - 2025 (${spotifyPayments.years} years)\n`;
-        output += `Total paid to Spotify: ${currency}${spotifyPayments.totalPaid.toFixed(2)}\n`;
+        output += `Total paid to Spotify: ${currency}${convertedTotal.toFixed(2)}\n`;
         output += `\nBreakdown by period:\n`;
         
         // Group breakdown by pricing periods
@@ -356,7 +435,9 @@ class SpotifyDataReader {
         for (const item of spotifyPayments.breakdown) {
             if (currentPrice !== item.monthlyPrice) {
                 if (currentPrice !== null) {
-                    output += `${periodStart}-${item.year - 1}: ${currency}${currentPrice.toFixed(2)}/month = ${currency}${periodTotal.toFixed(2)}\n`;
+                    const convertedPrice = this.convertCurrency(currentPrice);
+                    const convertedTotal = this.convertCurrency(periodTotal);
+                    output += `${periodStart}-${item.year - 1}: ${currency}${convertedPrice.toFixed(2)}/month = ${currency}${convertedTotal.toFixed(2)}\n`;
                 }
                 currentPrice = item.monthlyPrice;
                 periodStart = item.year;
@@ -369,10 +450,12 @@ class SpotifyDataReader {
         // Output final period
         if (currentPrice !== null) {
             const lastYear = spotifyPayments.breakdown[spotifyPayments.breakdown.length - 1].year;
-            output += `${periodStart}-${lastYear}: ${currency}${currentPrice.toFixed(2)}/month = ${currency}${periodTotal.toFixed(2)}\n`;
+            const convertedPrice = this.convertCurrency(currentPrice);
+            const convertedTotal = this.convertCurrency(periodTotal);
+            output += `${periodStart}-${lastYear}: ${currency}${convertedPrice.toFixed(2)}/month = ${currency}${convertedTotal.toFixed(2)}\n`;
         }
         
-        console.log(`\nPaid Spotify roughly ${currency}${spotifyPayments.totalPaid.toFixed(2)} over ${spotifyPayments.years} years (2009-2025) using historical pricing data`);
+        console.log(`\nPaid Spotify roughly ${currency}${convertedTotal.toFixed(2)} over ${spotifyPayments.years} years (2009-2025) using historical pricing data`);
         console.log(`Note: Pricing increased from £9.99 to £10.99 (2023) and to £11.99 (2024)`);
         
         return output;
@@ -412,6 +495,12 @@ class UIController {
         this.dataReader = new SpotifyDataReader();
         this.selectedFiles = [];
         
+        // Load currency preference
+        const savedCurrency = localStorage.getItem('spotify_currency');
+        if (savedCurrency) {
+            this.dataReader.currency = savedCurrency;
+        }
+        
         this.fileInput = document.getElementById('fileInput');
         this.fileList = document.getElementById('fileList');
         this.processBtn = document.getElementById('processBtn');
@@ -422,6 +511,68 @@ class UIController {
         
         this.initializeEventListeners();
         this.checkForStoredData();
+        this.createCurrencyToggle();
+    }
+
+    /**
+     * Create currency toggle button
+     */
+    createCurrencyToggle() {
+        // Check if toggle already exists
+        if (document.getElementById('currencyToggle')) {
+            return;
+        }
+        
+        const toggleContainer = document.createElement('div');
+        toggleContainer.id = 'currencyToggle';
+        toggleContainer.className = 'fixed top-4 right-4 bg-white rounded-lg shadow-lg p-3 border border-gray-200';
+        
+        toggleContainer.innerHTML = `
+            <div class="flex items-center gap-3">
+                <span class="text-sm font-medium text-gray-700">Currency:</span>
+                <div class="flex gap-2">
+                    <button id="currencyGBP" class="currency-btn px-3 py-1 rounded text-sm font-semibold transition-colors ${this.dataReader.currency === 'GBP' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                        £ GBP
+                    </button>
+                    <button id="currencyUSD" class="currency-btn px-3 py-1 rounded text-sm font-semibold transition-colors ${this.dataReader.currency === 'USD' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                        $ USD
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(toggleContainer);
+        
+        // Add event listeners
+        document.getElementById('currencyGBP').addEventListener('click', () => this.switchCurrency('GBP'));
+        document.getElementById('currencyUSD').addEventListener('click', () => this.switchCurrency('USD'));
+    }
+
+    /**
+     * Switch currency and refresh display
+     */
+    switchCurrency(currency) {
+        this.dataReader.setCurrency(currency);
+        
+        // Update button states
+        const gbpBtn = document.getElementById('currencyGBP');
+        const usdBtn = document.getElementById('currencyUSD');
+        
+        if (currency === 'GBP') {
+            gbpBtn.className = 'currency-btn px-3 py-1 rounded text-sm font-semibold transition-colors bg-blue-600 text-white';
+            usdBtn.className = 'currency-btn px-3 py-1 rounded text-sm font-semibold transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300';
+        } else {
+            usdBtn.className = 'currency-btn px-3 py-1 rounded text-sm font-semibold transition-colors bg-blue-600 text-white';
+            gbpBtn.className = 'currency-btn px-3 py-1 rounded text-sm font-semibold transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300';
+        }
+        
+        // Refresh display if data exists
+        if (this.dataReader.artistNames.length > 0) {
+            const outputText = this.dataReader.calculateCounts();
+            this.output.textContent = outputText;
+            this.displaySummaryHero();
+            this.displayTopArtistsTable();
+        }
     }
 
     /**
@@ -628,6 +779,7 @@ class UIController {
 
     displayTopArtistsTable() {
         const topArtists = this.dataReader.getTopArtists(10);
+        const currencySymbol = this.dataReader.getCurrencySymbol();
         
         // Check if table already exists and remove it
         const existingTable = document.getElementById('topArtistsTable');
@@ -659,8 +811,8 @@ class UIController {
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
                                 <td class="px-6 py-4 text-sm font-medium text-gray-900">${this.escapeHtml(artist.name)}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${artist.plays.toLocaleString()}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">$${artist.lowEstimate.toFixed(2)}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">$${artist.highEstimate.toFixed(2)}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${artist.lowEstimate.toFixed(2)}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${artist.highEstimate.toFixed(2)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -715,7 +867,7 @@ class UIController {
                 <p class="text-xl text-gray-700 leading-relaxed">
                     You've paid Spotify roughly 
                     <span class="inline-block bg-red-500 text-white font-bold px-3 py-1 rounded-lg text-2xl mx-1">
-                        £${stats.spotifyTotal.toFixed(2)}
+                        ${this.dataReader.getCurrencySymbol()}${this.dataReader.convertCurrency(stats.spotifyTotal).toFixed(2)}
                     </span>
                     since 2009.
                 </p>
@@ -728,11 +880,11 @@ class UIController {
                     </span>
                     (${stats.topArtistPlays.toLocaleString()} plays), has earned somewhere between 
                     <span class="inline-block bg-orange-500 text-white font-bold px-2 py-1 rounded-lg mx-1">
-                        $${stats.topArtistLow.toFixed(2)}
+                        ${this.dataReader.getCurrencySymbol()}${stats.topArtistLow.toFixed(2)}
                     </span>
                     and
                     <span class="inline-block bg-orange-500 text-white font-bold px-2 py-1 rounded-lg mx-1">
-                        $${stats.topArtistHigh.toFixed(2)}
+                        ${this.dataReader.getCurrencySymbol()}${stats.topArtistHigh.toFixed(2)}
                     </span>
                     from your streams.
                 </p>
