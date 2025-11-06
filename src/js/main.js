@@ -8,6 +8,9 @@ class SpotifyDataReader {
         this.listens = [];
         this.artistNames = [];
         this.artistPlaycounts = [];
+        this.albumNames = [];
+        this.albumArtists = [];
+        this.albumPlaycounts = [];
         this.blankTracks = 0;
         
         // Constants matching C# version
@@ -81,6 +84,9 @@ class SpotifyDataReader {
             const data = {
                 artistNames: this.artistNames,
                 artistPlaycounts: this.artistPlaycounts,
+                albumNames: this.albumNames,
+                albumArtists: this.albumArtists,
+                albumPlaycounts: this.albumPlaycounts,
                 blankTracks: this.blankTracks,
                 totalTracks: this.listens.length,
                 earliestYear: this.earliestYear,
@@ -117,6 +123,9 @@ class SpotifyDataReader {
             
             this.artistNames = data.artistNames;
             this.artistPlaycounts = data.artistPlaycounts;
+            this.albumNames = data.albumNames || [];
+            this.albumArtists = data.albumArtists || [];
+            this.albumPlaycounts = data.albumPlaycounts || [];
             this.blankTracks = data.blankTracks;
             this.earliestYear = data.earliestYear || 2009;
             this.latestYear = data.latestYear || new Date().getFullYear();
@@ -191,6 +200,9 @@ class SpotifyDataReader {
     processTracks(onProgress = null) {
         this.artistNames = [];
         this.artistPlaycounts = [];
+        this.albumNames = [];
+        this.albumArtists = [];
+        this.albumPlaycounts = [];
         this.blankTracks = 0;
         this.earliestYear = null;
         this.latestYear = null;
@@ -222,6 +234,23 @@ class SpotifyDataReader {
                     this.artistPlaycounts.push(1);
                 } else {
                     this.artistPlaycounts[artistIndex]++;
+                }
+                
+                // Track album plays
+                if (listen.master_metadata_album_album_name && 
+                    listen.master_metadata_album_album_name !== '') {
+                    
+                    const albumName = listen.master_metadata_album_album_name;
+                    const albumKey = `${albumName}|||${artistName}`; // Use separator to create unique key
+                    const albumIndex = this.albumNames.indexOf(albumKey);
+                    
+                    if (albumIndex === -1) {
+                        this.albumNames.push(albumKey);
+                        this.albumArtists.push(artistName);
+                        this.albumPlaycounts.push(1);
+                    } else {
+                        this.albumPlaycounts[albumIndex]++;
+                    }
                 }
             } else {
                 this.blankTracks++;
@@ -313,6 +342,39 @@ class SpotifyDataReader {
         artists.sort((a, b) => b.plays - a.plays);
         
         return artists.slice(0, n);
+    }
+
+    /**
+     * Get top N albums sorted by play count
+     */
+    getTopAlbums(n = 10) {
+        const albums = this.albumNames.map((albumKey, index) => {
+            // Split the key to get album name and artist
+            const [albumName] = albumKey.split('|||');
+            const artistName = this.albumArtists[index];
+            
+            const lowUSD = this.albumPlaycounts[index] * this.payPerListenLow;
+            const highUSD = this.albumPlaycounts[index] * this.payPerListenHigh;
+            
+            // Calculate label earnings and artist share (20% of label)
+            const lowLabelEarning = this.currency === 'GBP' ? lowUSD / this.exchangeRate : lowUSD;
+            const highLabelEarning = this.currency === 'GBP' ? highUSD / this.exchangeRate : highUSD;
+            
+            return {
+                albumName,
+                artistName,
+                plays: this.albumPlaycounts[index],
+                lowEstimate: lowLabelEarning * this.artistShareOfStreaming,
+                highEstimate: highLabelEarning * this.artistShareOfStreaming,
+                lowLabelEstimate: lowLabelEarning,
+                highLabelEstimate: highLabelEarning
+            };
+        });
+        
+        // Sort by plays descending
+        albums.sort((a, b) => b.plays - a.plays);
+        
+        return albums.slice(0, n);
     }
 
     /**
@@ -611,6 +673,7 @@ class UIController {
             this.output.textContent = outputText;
             this.displaySummaryHero();
             this.displayTopArtistsTable();
+            this.displayTopAlbumsTable();
         }
     }
 
@@ -672,6 +735,9 @@ class UIController {
                 // Display top artists table
                 this.displayTopArtistsTable();
                 
+                // Display top albums table
+                this.displayTopAlbumsTable();
+                
                 // Add download button
                 this.addDownloadButton();
                 
@@ -698,8 +764,10 @@ class UIController {
             // Clear UI
             this.results.classList.add('hidden');
             this.output.textContent = '';
-            const table = document.getElementById('topArtistsTable');
-            if (table) table.remove();
+            const artistsTable = document.getElementById('topArtistsTable');
+            if (artistsTable) artistsTable.remove();
+            const albumsTable = document.getElementById('topAlbumsTable');
+            if (albumsTable) albumsTable.remove();
         }
     }
 
@@ -786,6 +854,9 @@ class UIController {
             // Create top 10 artists table
             this.displayTopArtistsTable();
             
+            // Create top 10 albums table
+            this.displayTopAlbumsTable();
+            
             // Add download button
             this.addDownloadButton();
             
@@ -861,6 +932,60 @@ class UIController {
         
         // Insert table after the output div
         this.output.parentElement.insertBefore(tableContainer, this.output.nextSibling);
+    }
+
+    displayTopAlbumsTable() {
+        const topAlbums = this.dataReader.getTopAlbums(10);
+        const currencySymbol = this.dataReader.getCurrencySymbol();
+        
+        // Check if table already exists and remove it
+        const existingTable = document.getElementById('topAlbumsTable');
+        if (existingTable) {
+            existingTable.remove();
+        }
+        
+        // Create table container
+        const tableContainer = document.createElement('div');
+        tableContainer.id = 'topAlbumsTable';
+        tableContainer.className = 'mt-6';
+        
+        tableContainer.innerHTML = `
+            <h3 class="text-xl font-semibold mb-4 text-gray-700">Top 10 Most Streamed Albums</h3>
+            <div class="overflow-x-auto">
+                <table class="min-w-full bg-white border border-gray-200 rounded-lg overflow-hidden">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">#</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Album</th>
+                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist</th>
+                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Plays</th>
+                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist Low (20%)</th>
+                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist High (20%)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        ${topAlbums.map((album, index) => `
+                            <tr class="hover:bg-gray-50 transition-colors">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
+                                <td class="px-6 py-4 text-sm font-medium text-gray-900">${this.escapeHtml(album.albumName)}</td>
+                                <td class="px-6 py-4 text-sm text-gray-700">${this.escapeHtml(album.artistName)}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${album.plays.toLocaleString()}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${album.lowEstimate.toFixed(2)}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${album.highEstimate.toFixed(2)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        // Insert table after the artists table
+        const artistsTable = document.getElementById('topArtistsTable');
+        if (artistsTable) {
+            artistsTable.parentElement.insertBefore(tableContainer, artistsTable.nextSibling);
+        } else {
+            this.output.parentElement.insertBefore(tableContainer, this.output.nextSibling);
+        }
     }
 
     /**
