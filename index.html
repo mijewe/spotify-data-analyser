@@ -15,6 +15,36 @@
     <div class="container mx-auto p-8 max-w-4xl">
         <h1 class="text-4xl font-bold mb-8 text-gray-800">Spotify Streaming History Analyzer</h1>
         
+        <!-- Instructions Section -->
+        <div class="bg-gradient-to-r from-green-50 to-blue-50 rounded-lg shadow-md p-6 mb-6 border border-green-200">
+            <div class="flex items-start">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-2">How to Get Your Spotify Data</h3>
+                    <div class="text-sm text-gray-700 space-y-2">
+                        <p>Don't have your data yet? Here's how to request it:</p>
+                        <ol class="list-decimal list-inside space-y-1 ml-2">
+                            <li>Go to <a href="https://www.spotify.com/account/privacy/" target="_blank" rel="noopener noreferrer" class="text-blue-600 hover:text-blue-800 font-medium underline">spotify.com/account/privacy</a></li>
+                            <li>Scroll down to "Download your data"</li>
+                            <li>Select "Extended streaming history" (recommended for full analysis)</li>
+                            <li>Click "Request data"</li>
+                            <li>Wait 5-30 days for Spotify to prepare your data</li>
+                            <li>Download the ZIP file when you receive the email</li>
+                            <li>Extract the JSON files and upload them here</li>
+                        </ol>
+                        <p class="mt-3 text-xs text-gray-600">
+                            <strong>Note:</strong> Extended streaming history includes your complete listening history since you created your account. 
+                            Standard data only includes the last year.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="bg-white rounded-lg shadow-md p-6 mb-6">
             <h2 class="text-2xl font-semibold mb-4 text-gray-700">Upload Your Streaming History</h2>
             <p class="text-gray-600 mb-4">Select multiple JSON files from your Spotify data export</p>
