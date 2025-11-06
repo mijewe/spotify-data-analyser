@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spotify</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="src/css/main.css">
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto p-8 max-w-4xl">
+        <h1 class="text-4xl font-bold mb-8 text-gray-800">Spotify Streaming History Analyzer</h1>
+        
+        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-700">Upload Your Streaming History</h2>
+            <p class="text-gray-600 mb-4">Select multiple JSON files from your Spotify data export</p>
+            
+            <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors">
+                <input 
+                    type="file" 
+                    id="fileInput" 
+                    multiple 
+                    accept=".json"
+                    class="hidden"
+                >
+                <label for="fileInput" class="cursor-pointer">
+                    <div class="text-gray-600">
+                        <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <span class="text-blue-600 font-semibold">Click to select files</span>
+                        <span class="text-gray-500"> or drag and drop</span>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">JSON files only</p>
+                </label>
+            </div>
+            
+            <div id="fileList" class="mt-4"></div>
+            
+            <button 
+                id="processBtn" 
+                class="mt-6 w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                disabled
+            >
+                Process Files
+            </button>
+        </div>
+        
+        <div id="results" class="bg-white rounded-lg shadow-md p-6 hidden">
+            <h2 class="text-2xl font-semibold mb-4 text-gray-700">Detailed Statistics</h2>
+            <div id="output" class="font-mono text-sm bg-gray-50 p-4 rounded border border-gray-200 whitespace-pre-wrap"></div>
+        </div>
+        
+        <div id="loading" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+            <div class="bg-white rounded-lg p-8 text-center">
+                <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-green-600 mx-auto mb-4"></div>
+                <p class="text-gray-700 font-semibold">Processing your data...</p>
+                <p id="progressText" class="text-gray-500 text-sm mt-2"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Custom JavaScript -->
+    <script src="src/js/main.js"></script>
+</body>
+</html>

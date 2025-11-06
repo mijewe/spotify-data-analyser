@@ -1,0 +1,100 @@
+/**
+ * Custom styles for Spotify Data Reader
+ */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+}
+
+/* File input hover effects */
+#fileInput:hover + label {
+    opacity: 0.8;
+}
+
+/* Loading animation */
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Results output styling */
+#output {
+    line-height: 1.6;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+#output::-webkit-scrollbar {
+    width: 8px;
+}
+
+#output::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+#output::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+#output::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* File list styling */
+#fileList li {
+    padding: 4px 0;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+#fileList li:last-child {
+    border-bottom: none;
+}
+
+/* Smooth transitions */
+button {
+    transition: all 0.2s ease-in-out;
+}
+
+button:active {
+    transform: scale(0.98);
+}
+
+/* Top Artists Table Styling */
+#topArtistsTable table {
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+}
+
+#topArtistsTable thead th {
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+#topArtistsTable tbody tr:nth-child(1) {
+    background-color: #fef3c7;
+}
+
+#topArtistsTable tbody tr:nth-child(1):hover {
+    background-color: #fde68a;
+}
+
+#topArtistsTable tbody tr:nth-child(2) {
+    background-color: #f3f4f6;
+}
+
+#topArtistsTable tbody tr:nth-child(3) {
+    background-color: #fef2f2;
+}
+
+#topArtistsTable tbody tr:nth-child(3):hover {
+    background-color: #fee2e2;
+}
