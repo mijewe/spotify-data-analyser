@@ -11,6 +11,8 @@ class SpotifyDataReader {
         this.albumNames = [];
         this.albumArtists = [];
         this.albumPlaycounts = [];
+        this.albumTrackCounts = []; // Number of unique tracks per album
+        this.albumTracks = []; // Set of track names per album
         this.blankTracks = 0;
         
         // Constants matching C# version
@@ -87,6 +89,7 @@ class SpotifyDataReader {
                 albumNames: this.albumNames,
                 albumArtists: this.albumArtists,
                 albumPlaycounts: this.albumPlaycounts,
+                albumTrackCounts: this.albumTrackCounts,
                 blankTracks: this.blankTracks,
                 totalTracks: this.listens.length,
                 earliestYear: this.earliestYear,
@@ -126,6 +129,7 @@ class SpotifyDataReader {
             this.albumNames = data.albumNames || [];
             this.albumArtists = data.albumArtists || [];
             this.albumPlaycounts = data.albumPlaycounts || [];
+            this.albumTrackCounts = data.albumTrackCounts || [];
             this.blankTracks = data.blankTracks;
             this.earliestYear = data.earliestYear || 2009;
             this.latestYear = data.latestYear || new Date().getFullYear();
@@ -203,6 +207,8 @@ class SpotifyDataReader {
         this.albumNames = [];
         this.albumArtists = [];
         this.albumPlaycounts = [];
+        this.albumTrackCounts = [];
+        this.albumTracks = [];
         this.blankTracks = 0;
         this.earliestYear = null;
         this.latestYear = null;
@@ -241,6 +247,7 @@ class SpotifyDataReader {
                     listen.master_metadata_album_album_name !== '') {
                     
                     const albumName = listen.master_metadata_album_album_name;
+                    const trackName = listen.master_metadata_track_name || '';
                     const albumKey = `${albumName}|||${artistName}`; // Use separator to create unique key
                     const albumIndex = this.albumNames.indexOf(albumKey);
                     
@@ -248,8 +255,12 @@ class SpotifyDataReader {
                         this.albumNames.push(albumKey);
                         this.albumArtists.push(artistName);
                         this.albumPlaycounts.push(1);
+                        this.albumTracks.push(new Set([trackName]));
                     } else {
                         this.albumPlaycounts[albumIndex]++;
+                        if (trackName) {
+                            this.albumTracks[albumIndex].add(trackName);
+                        }
                     }
                 }
             } else {
@@ -265,6 +276,9 @@ class SpotifyDataReader {
         if (onProgress) {
             onProgress(totalTracks, totalTracks);
         }
+        
+        // Calculate track counts for each album
+        this.albumTrackCounts = this.albumTracks.map(trackSet => trackSet.size);
         
         // Default to current year if we couldn't determine from data
         if (!this.earliestYear) this.earliestYear = 2009;
@@ -353,6 +367,11 @@ class SpotifyDataReader {
             const [albumName] = albumKey.split('|||');
             const artistName = this.albumArtists[index];
             
+            // Calculate album plays (total track plays divided by number of tracks on album)
+            const trackCount = this.albumTrackCounts[index] || 1; // Default to 1 to avoid division by zero
+            const albumPlays = Math.round(this.albumPlaycounts[index] / trackCount);
+            
+            // Calculate earnings based on total track plays (not album plays)
             const lowUSD = this.albumPlaycounts[index] * this.payPerListenLow;
             const highUSD = this.albumPlaycounts[index] * this.payPerListenHigh;
             
@@ -363,7 +382,9 @@ class SpotifyDataReader {
             return {
                 albumName,
                 artistName,
-                plays: this.albumPlaycounts[index],
+                plays: albumPlays,
+                trackCount: trackCount,
+                totalTrackPlays: this.albumPlaycounts[index],
                 lowEstimate: lowLabelEarning * this.artistShareOfStreaming,
                 highEstimate: highLabelEarning * this.artistShareOfStreaming,
                 lowLabelEstimate: lowLabelEarning,
@@ -371,10 +392,13 @@ class SpotifyDataReader {
             };
         });
         
-        // Sort by plays descending
-        albums.sort((a, b) => b.plays - a.plays);
+        // Filter to only include actual albums (minimum 8 tracks)
+        const actualAlbums = albums.filter(album => album.trackCount >= 8);
         
-        return albums.slice(0, n);
+        // Sort by album plays descending
+        actualAlbums.sort((a, b) => b.plays - a.plays);
+        
+        return actualAlbums.slice(0, n);
     }
 
     /**
