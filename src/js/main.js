@@ -8,6 +8,7 @@ class SpotifyDataReader {
         this.listens = [];
         this.artistNames = [];
         this.artistPlaycounts = [];
+        this.artistYearlyData = {}; // Track streams per artist per year
         this.albumNames = [];
         this.albumArtists = [];
         this.albumPlaycounts = [];
@@ -86,6 +87,7 @@ class SpotifyDataReader {
             const data = {
                 artistNames: this.artistNames,
                 artistPlaycounts: this.artistPlaycounts,
+                artistYearlyData: this.artistYearlyData,
                 albumNames: this.albumNames,
                 albumArtists: this.albumArtists,
                 albumPlaycounts: this.albumPlaycounts,
@@ -126,6 +128,7 @@ class SpotifyDataReader {
             
             this.artistNames = data.artistNames;
             this.artistPlaycounts = data.artistPlaycounts;
+            this.artistYearlyData = data.artistYearlyData || {};
             this.albumNames = data.albumNames || [];
             this.albumArtists = data.albumArtists || [];
             this.albumPlaycounts = data.albumPlaycounts || [];
@@ -204,6 +207,7 @@ class SpotifyDataReader {
     processTracks(onProgress = null) {
         this.artistNames = [];
         this.artistPlaycounts = [];
+        this.artistYearlyData = {};
         this.albumNames = [];
         this.albumArtists = [];
         this.albumPlaycounts = [];
@@ -240,6 +244,18 @@ class SpotifyDataReader {
                     this.artistPlaycounts.push(1);
                 } else {
                     this.artistPlaycounts[artistIndex]++;
+                }
+                
+                // Track yearly data for artist
+                if (listen.ts) {
+                    const year = new Date(listen.ts).getFullYear();
+                    if (!this.artistYearlyData[artistName]) {
+                        this.artistYearlyData[artistName] = {};
+                    }
+                    if (!this.artistYearlyData[artistName][year]) {
+                        this.artistYearlyData[artistName][year] = 0;
+                    }
+                    this.artistYearlyData[artistName][year]++;
                 }
                 
                 // Track album plays
@@ -399,6 +415,36 @@ class SpotifyDataReader {
         actualAlbums.sort((a, b) => b.plays - a.plays);
         
         return actualAlbums.slice(0, n);
+    }
+
+    /**
+     * Get yearly streaming data for top N artists
+     */
+    getTopArtistsYearlyData(n = 10) {
+        const topArtists = this.getTopArtists(n);
+        const years = [];
+        
+        // Get all years in range
+        for (let year = this.earliestYear; year <= this.latestYear; year++) {
+            years.push(year);
+        }
+        
+        // Build datasets for each artist
+        const datasets = topArtists.map(artist => {
+            const data = years.map(year => {
+                return this.artistYearlyData[artist.name]?.[year] || 0;
+            });
+            
+            return {
+                label: artist.name,
+                data: data
+            };
+        });
+        
+        return {
+            years: years,
+            datasets: datasets
+        };
     }
 
     /**
@@ -698,6 +744,7 @@ class UIController {
             this.displaySummaryHero();
             this.displayTopArtistsTable();
             this.displayTopAlbumsTable();
+            this.displayStreamingChart();
         }
     }
 
@@ -762,6 +809,9 @@ class UIController {
                 // Display top albums table
                 this.displayTopAlbumsTable();
                 
+                // Display streaming chart
+                this.displayStreamingChart();
+                
                 // Add download button
                 this.addDownloadButton();
                 
@@ -785,6 +835,12 @@ class UIController {
             const banner = document.getElementById('storedDataBanner');
             if (banner) banner.remove();
             
+            // Destroy chart if it exists
+            if (this.streamingChart) {
+                this.streamingChart.destroy();
+                this.streamingChart = null;
+            }
+            
             // Clear UI
             this.results.classList.add('hidden');
             this.output.textContent = '';
@@ -792,6 +848,8 @@ class UIController {
             if (artistsTable) artistsTable.remove();
             const albumsTable = document.getElementById('topAlbumsTable');
             if (albumsTable) albumsTable.remove();
+            const chartContainer = document.getElementById('streamingChartContainer');
+            if (chartContainer) chartContainer.remove();
         }
     }
 
@@ -880,6 +938,9 @@ class UIController {
             
             // Create top 10 albums table
             this.displayTopAlbumsTable();
+            
+            // Create streaming chart
+            this.displayStreamingChart();
             
             // Add download button
             this.addDownloadButton();
@@ -1010,6 +1071,134 @@ class UIController {
         } else {
             this.output.parentElement.insertBefore(tableContainer, this.output.nextSibling);
         }
+    }
+
+    /**
+     * Display streaming pattern chart for top 10 artists
+     */
+    displayStreamingChart() {
+        const chartData = this.dataReader.getTopArtistsYearlyData(10);
+        
+        // Check if chart already exists and remove it
+        const existingChart = document.getElementById('streamingChartContainer');
+        if (existingChart) {
+            existingChart.remove();
+        }
+        
+        // Create chart container
+        const chartContainer = document.createElement('div');
+        chartContainer.id = 'streamingChartContainer';
+        chartContainer.className = 'mt-6 bg-white p-6 rounded-lg border border-gray-200';
+        
+        chartContainer.innerHTML = `
+            <h3 class="text-xl font-semibold mb-4 text-gray-700">Top 10 Artists - Streaming Patterns Over Time</h3>
+            <div class="relative" style="height: 400px;">
+                <canvas id="streamingChart"></canvas>
+            </div>
+        `;
+        
+        // Insert chart after the albums table
+        const albumsTable = document.getElementById('topAlbumsTable');
+        if (albumsTable) {
+            albumsTable.parentElement.insertBefore(chartContainer, albumsTable.nextSibling);
+        } else {
+            this.output.parentElement.insertBefore(chartContainer, this.output.nextSibling);
+        }
+        
+        // Create the chart
+        const ctx = document.getElementById('streamingChart').getContext('2d');
+        
+        // Generate colors for each artist
+        const colors = [
+            'rgb(59, 130, 246)',   // blue
+            'rgb(239, 68, 68)',    // red
+            'rgb(34, 197, 94)',    // green
+            'rgb(168, 85, 247)',   // purple
+            'rgb(251, 146, 60)',   // orange
+            'rgb(236, 72, 153)',   // pink
+            'rgb(14, 165, 233)',   // sky
+            'rgb(132, 204, 22)',   // lime
+            'rgb(251, 191, 36)',   // amber
+            'rgb(163, 163, 163)'   // gray
+        ];
+        
+        const datasets = chartData.datasets.map((dataset, index) => ({
+            label: dataset.label,
+            data: dataset.data,
+            borderColor: colors[index % colors.length],
+            backgroundColor: colors[index % colors.length] + '20',
+            borderWidth: 2,
+            tension: 0.4,
+            fill: false,
+            pointRadius: 3,
+            pointHoverRadius: 5
+        }));
+        
+        this.streamingChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.years,
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            padding: 10,
+                            font: {
+                                size: 11
+                            }
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': ' + context.parsed.y.toLocaleString() + ' streams';
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Year',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            display: false
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Number of Streams',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /**
