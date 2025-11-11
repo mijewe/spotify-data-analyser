@@ -17,9 +17,14 @@ class SpotifyDataReader {
         this.blankTracks = 0;
         
         // Constants matching C# version
-        this.payPerListenLow = 0.003;
-        this.payPerListenHigh = 0.005;
+        this.payPerListen = 0.004; // Average pay per stream
         this.artistShareOfStreaming = 0.20; // Artists get ~20% of label's streaming revenue
+        this.artistShareOfAlbum = 0.20; // Artists get ~20% of album sales (same as streaming for fair comparison)
+        this.albumPriceGBP = 10.00; // Average album price in GBP
+        this.albumPriceUSD = 12.99; // Average album price in USD
+        
+        // Album purchase threshold
+        this.albumPurchaseThreshold = 5; // Minimum album plays to consider "worth buying"
         
         // Currency settings
         this.currency = 'GBP'; // 'GBP' or 'USD'
@@ -351,20 +356,16 @@ class SpotifyDataReader {
      */
     getTopArtists(n = 10) {
         const artists = this.artistNames.map((name, index) => {
-            const lowUSD = this.artistPlaycounts[index] * this.payPerListenLow;
-            const highUSD = this.artistPlaycounts[index] * this.payPerListenHigh;
+            const earningsUSD = this.artistPlaycounts[index] * this.payPerListen;
             
             // Calculate label earnings and artist share (20% of label)
-            const lowLabelEarning = this.currency === 'GBP' ? lowUSD / this.exchangeRate : lowUSD;
-            const highLabelEarning = this.currency === 'GBP' ? highUSD / this.exchangeRate : highUSD;
+            const labelEarning = this.currency === 'GBP' ? earningsUSD / this.exchangeRate : earningsUSD;
             
             return {
                 name,
                 plays: this.artistPlaycounts[index],
-                lowEstimate: lowLabelEarning * this.artistShareOfStreaming,
-                highEstimate: highLabelEarning * this.artistShareOfStreaming,
-                lowLabelEstimate: lowLabelEarning,
-                highLabelEstimate: highLabelEarning
+                estimate: labelEarning * this.artistShareOfStreaming,
+                labelEstimate: labelEarning
             };
         });
         
@@ -388,12 +389,10 @@ class SpotifyDataReader {
             const albumPlays = Math.round(this.albumPlaycounts[index] / trackCount);
             
             // Calculate earnings based on total track plays (not album plays)
-            const lowUSD = this.albumPlaycounts[index] * this.payPerListenLow;
-            const highUSD = this.albumPlaycounts[index] * this.payPerListenHigh;
+            const earningsUSD = this.albumPlaycounts[index] * this.payPerListen;
             
             // Calculate label earnings and artist share (20% of label)
-            const lowLabelEarning = this.currency === 'GBP' ? lowUSD / this.exchangeRate : lowUSD;
-            const highLabelEarning = this.currency === 'GBP' ? highUSD / this.exchangeRate : highUSD;
+            const labelEarning = this.currency === 'GBP' ? earningsUSD / this.exchangeRate : earningsUSD;
             
             return {
                 albumName,
@@ -401,10 +400,8 @@ class SpotifyDataReader {
                 plays: albumPlays,
                 trackCount: trackCount,
                 totalTrackPlays: this.albumPlaycounts[index],
-                lowEstimate: lowLabelEarning * this.artistShareOfStreaming,
-                highEstimate: highLabelEarning * this.artistShareOfStreaming,
-                lowLabelEstimate: lowLabelEarning,
-                highLabelEstimate: highLabelEarning
+                estimate: labelEarning * this.artistShareOfStreaming,
+                labelEstimate: labelEarning
             };
         });
         
@@ -444,6 +441,49 @@ class SpotifyDataReader {
         return {
             years: years,
             datasets: datasets
+        };
+    }
+
+    /**
+     * Calculate album purchase alternative based on threshold
+     */
+    calculateAlbumPurchaseAlternative(threshold = null) {
+        if (threshold === null) {
+            threshold = this.albumPurchaseThreshold;
+        }
+        
+        // Filter albums that have been played at least 'threshold' times
+        const qualifyingAlbums = [];
+        
+        for (let i = 0; i < this.albumNames.length; i++) {
+            const trackCount = this.albumTrackCounts[i] || 1;
+            const albumPlays = Math.round(this.albumPlaycounts[i] / trackCount);
+            
+            // Only include actual albums (8+ tracks) that meet the threshold
+            if (trackCount >= 8 && albumPlays >= threshold) {
+                const [albumName] = this.albumNames[i].split('|||');
+                const artistName = this.albumArtists[i];
+                
+                qualifyingAlbums.push({
+                    albumName,
+                    artistName,
+                    plays: albumPlays,
+                    totalTrackPlays: this.albumPlaycounts[i]
+                });
+            }
+        }
+        
+        const albumCount = qualifyingAlbums.length;
+        const albumPrice = this.currency === 'GBP' ? this.albumPriceGBP : this.albumPriceUSD;
+        const totalCost = albumCount * albumPrice;
+        const artistEarnings = totalCost * this.artistShareOfAlbum;
+        
+        return {
+            albumCount,
+            totalCost,
+            artistEarnings,
+            threshold,
+            albums: qualifyingAlbums
         };
     }
 
@@ -502,12 +542,13 @@ class SpotifyDataReader {
         const spotifyPayments = this.calculateSpotifyPayments(startYear, endYear);
         
         // Calculate top artist payments (label and artist share)
-        const topArtistLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
-        const topArtistHighUSD = this.mostPlayedArtistCount * this.payPerListenHigh;
-        const topArtistLabelLow = this.currency === 'GBP' ? topArtistLowUSD / this.exchangeRate : topArtistLowUSD;
-        const topArtistLabelHigh = this.currency === 'GBP' ? topArtistHighUSD / this.exchangeRate : topArtistHighUSD;
-        const topArtistLow = topArtistLabelLow * this.artistShareOfStreaming;
-        const topArtistHigh = topArtistLabelHigh * this.artistShareOfStreaming;
+        const topArtistUSD = this.mostPlayedArtistCount * this.payPerListen;
+        const topArtistLabel = this.currency === 'GBP' ? topArtistUSD / this.exchangeRate : topArtistUSD;
+        const topArtistEarnings = topArtistLabel * this.artistShareOfStreaming;
+        
+        // Calculate total artist earnings across all streams
+        const totalArtistEarningsUSD = validListens * this.payPerListen * this.artistShareOfStreaming;
+        const totalArtistEarnings = this.currency === 'GBP' ? totalArtistEarningsUSD / this.exchangeRate : totalArtistEarningsUSD;
         
         // Store summary data for UI display
         this.summaryStats = {
@@ -518,29 +559,24 @@ class SpotifyDataReader {
             spotifyTotal: spotifyPayments.totalPaid,
             topArtist: this.mostPlayedArtist,
             topArtistPlays: this.mostPlayedArtistCount,
-            topArtistLow: topArtistLow,
-            topArtistHigh: topArtistHigh,
-            topArtistLabelLow: topArtistLabelLow,
-            topArtistLabelHigh: topArtistLabelHigh
+            topArtistEarnings: topArtistEarnings,
+            topArtistLabel: topArtistLabel,
+            totalArtistEarnings: totalArtistEarnings
         };
         
         // Output money to labels and artists
         const currency = this.getCurrencySymbol();
-        const lowLabelEstimate = this.currency === 'GBP' ? (validListens * this.payPerListenLow) / this.exchangeRate : validListens * this.payPerListenLow;
-        const highLabelEstimate = this.currency === 'GBP' ? (validListens * this.payPerListenHigh) / this.exchangeRate : validListens * this.payPerListenHigh;
-        const lowArtistEstimate = lowLabelEstimate * this.artistShareOfStreaming;
-        const highArtistEstimate = highLabelEstimate * this.artistShareOfStreaming;
+        const labelEstimate = this.currency === 'GBP' ? (validListens * this.payPerListen) / this.exchangeRate : validListens * this.payPerListen;
+        const artistEstimate = labelEstimate * this.artistShareOfStreaming;
         
         output += `=== STREAMING REVENUE ===\n`;
         output += `Money to labels over ${validListens} listens:\n`;
-        output += `  Low estimate (${currency}${(this.payPerListenLow / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${lowLabelEstimate.toFixed(2)}\n`;
-        output += `  High estimate (${currency}${(this.payPerListenHigh / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen): ${currency}${highLabelEstimate.toFixed(2)}\n`;
+        output += `  ${currency}${(this.payPerListen / (this.currency === 'GBP' ? this.exchangeRate : 1)).toFixed(4)} per listen: ${currency}${labelEstimate.toFixed(2)}\n`;
         output += `\nMoney to artists (20% of label revenue):\n`;
-        output += `  Low estimate: ${currency}${lowArtistEstimate.toFixed(2)}\n`;
-        output += `  High estimate: ${currency}${highArtistEstimate.toFixed(2)}\n\n`;
+        output += `  ${currency}${artistEstimate.toFixed(2)}\n\n`;
         
-        console.log(`Money to labels over ${validListens} listens (low estimate): ${currency}${lowLabelEstimate.toFixed(2)}`);
-        console.log(`Money to artists over ${validListens} listens (low estimate): ${currency}${lowArtistEstimate.toFixed(2)}`);
+        console.log(`Money to labels over ${validListens} listens: ${currency}${labelEstimate.toFixed(2)}`);
+        console.log(`Money to artists over ${validListens} listens: ${currency}${artistEstimate.toFixed(2)}`);
         
         // Output top artists (both label and artist earnings)
         const mostPlayedLabelLowUSD = this.mostPlayedArtistCount * this.payPerListenLow;
@@ -676,7 +712,6 @@ class UIController {
         this.fileList = document.getElementById('fileList');
         this.processBtn = document.getElementById('processBtn');
         this.results = document.getElementById('results');
-        this.output = document.getElementById('output');
         this.loading = document.getElementById('loading');
         this.progressText = document.getElementById('progressText');
         
@@ -739,9 +774,9 @@ class UIController {
         
         // Refresh display if data exists
         if (this.dataReader.artistNames.length > 0) {
-            const outputText = this.dataReader.calculateCounts();
-            this.output.textContent = outputText;
+            this.dataReader.calculateCounts();
             this.displaySummaryHero();
+            this.displayAlbumPurchaseAlternative();
             this.displayTopArtistsTable();
             this.displayTopAlbumsTable();
             this.displayStreamingChart();
@@ -796,12 +831,14 @@ class UIController {
         
         setTimeout(() => {
             if (this.dataReader.loadFromLocalStorage()) {
-                const outputText = this.dataReader.calculateCounts();
-                this.output.textContent = outputText;
+                this.dataReader.calculateCounts();
                 this.results.classList.remove('hidden');
                 
                 // Display summary hero
                 this.displaySummaryHero();
+                
+                // Display album purchase alternative
+                this.displayAlbumPurchaseAlternative();
                 
                 // Display top artists table
                 this.displayTopArtistsTable();
@@ -843,7 +880,12 @@ class UIController {
             
             // Clear UI
             this.results.classList.add('hidden');
-            this.output.textContent = '';
+            const hero = document.getElementById('summaryHero');
+            if (hero) hero.remove();
+            const albumPurchaseContainer = document.getElementById('albumPurchaseAlternative');
+            if (albumPurchaseContainer) albumPurchaseContainer.remove();
+            const assumptionsInfo = document.getElementById('assumptionsInfo');
+            if (assumptionsInfo) assumptionsInfo.remove();
             const artistsTable = document.getElementById('topArtistsTable');
             if (artistsTable) artistsTable.remove();
             const albumsTable = document.getElementById('topAlbumsTable');
@@ -927,11 +969,13 @@ class UIController {
             this.dataReader.saveToLocalStorage();
             
             // Display results
-            this.output.textContent = outputText;
             this.results.classList.remove('hidden');
             
             // Display summary hero
             this.displaySummaryHero();
+            
+            // Display album purchase alternative
+            this.displayAlbumPurchaseAlternative();
             
             // Create top 10 artists table
             this.displayTopArtistsTable();
@@ -969,7 +1013,7 @@ class UIController {
         downloadBtn.className = 'mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded transition-colors';
         downloadBtn.onclick = () => this.dataReader.downloadArtistData();
         
-        this.output.parentElement.appendChild(downloadBtn);
+        this.results.appendChild(downloadBtn);
     }
 
     displayTopArtistsTable() {
@@ -996,8 +1040,7 @@ class UIController {
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">#</th>
                             <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist</th>
                             <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Plays</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist Low (20%)</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist High (20%)</th>
+                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist Earnings (20%)</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
@@ -1006,8 +1049,7 @@ class UIController {
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
                                 <td class="px-6 py-4 text-sm font-medium text-gray-900">${this.escapeHtml(artist.name)}</td>
                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${artist.plays.toLocaleString()}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${artist.lowEstimate.toFixed(2)}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${artist.highEstimate.toFixed(2)}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${artist.estimate.toFixed(2)}</td>
                             </tr>
                         `).join('')}
                     </tbody>
@@ -1015,13 +1057,14 @@ class UIController {
             </div>
         `;
         
-        // Insert table after the output div
-        this.output.parentElement.insertBefore(tableContainer, this.output.nextSibling);
+        // Insert table in results
+        this.results.appendChild(tableContainer);
     }
 
     displayTopAlbumsTable() {
         const topAlbums = this.dataReader.getTopAlbums(10);
         const currencySymbol = this.dataReader.getCurrencySymbol();
+        const albumPrice = this.dataReader.currency === 'GBP' ? this.dataReader.albumPriceGBP : this.dataReader.albumPriceUSD;
         
         // Check if table already exists and remove it
         const existingTable = document.getElementById('topAlbumsTable');
@@ -1035,41 +1078,65 @@ class UIController {
         tableContainer.className = 'mt-6';
         
         tableContainer.innerHTML = `
-            <h3 class="text-xl font-semibold mb-4 text-gray-700">Top 10 Most Streamed Albums</h3>
+            <h3 class="text-xl font-semibold mb-4 text-gray-700">Top 10 Most Streamed Albums - Streaming vs Purchase Earnings</h3>
             <div class="overflow-x-auto">
                 <table class="min-w-full bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <thead class="bg-gray-100">
                         <tr>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">#</th>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Album</th>
-                            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Plays</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist Low (20%)</th>
-                            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b">Artist High (20%)</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b" rowspan="2">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b" rowspan="2">Album</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider border-b" rowspan="2">Artist</th>
+                            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider border-b" rowspan="2">Album Plays</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-blue-700 uppercase tracking-wider border-b border-l border-r" colspan="3">Earned from Streams</th>
+                            <th class="px-4 py-3 text-center text-xs font-semibold text-green-700 uppercase tracking-wider border-b border-r" colspan="1">vs Album Purchase</th>
+                        </tr>
+                        <tr>
+                            <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b border-l">Track Streams</th>
+                            <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b">Label</th>
+                            <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b border-r">Artist (20%)</th>
+                            <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider border-b border-r">Artist Multiple</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
-                        ${topAlbums.map((album, index) => `
+                        ${topAlbums.map((album, index) => {
+                            // Calculate streaming earnings based on total track streams
+                            const labelStreaming = album.totalTrackPlays * this.dataReader.payPerListen;
+                            const artistStreaming = labelStreaming * this.dataReader.artistShareOfStreaming;
+                            
+                            // Calculate purchase earnings (if user bought album once)
+                            const artistPurchase = albumPrice * this.dataReader.artistShareOfAlbum;
+                            
+                            // Calculate how many times more the artist would have earned from purchase
+                            const multiple = artistPurchase / this.dataReader.convertCurrency(artistStreaming);
+                            
+                            // Convert to selected currency
+                            const labelStreamingConverted = this.dataReader.convertCurrency(labelStreaming);
+                            const artistStreamingConverted = this.dataReader.convertCurrency(artistStreaming);
+                            
+                            return `
                             <tr class="hover:bg-gray-50 transition-colors">
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
-                                <td class="px-6 py-4 text-sm font-medium text-gray-900">${this.escapeHtml(album.albumName)}</td>
-                                <td class="px-6 py-4 text-sm text-gray-700">${this.escapeHtml(album.artistName)}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${album.plays.toLocaleString()}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${album.lowEstimate.toFixed(2)}</td>
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${currencySymbol}${album.highEstimate.toFixed(2)}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-500">${index + 1}</td>
+                                <td class="px-4 py-4 text-sm font-medium text-gray-900">${this.escapeHtml(album.albumName)}</td>
+                                <td class="px-4 py-4 text-sm text-gray-700">${this.escapeHtml(album.artistName)}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-700 text-right">${album.plays.toLocaleString()}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-600 text-right border-l bg-blue-50">${album.totalTrackPlays.toLocaleString()}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-700 text-right bg-blue-50">${currencySymbol}${labelStreamingConverted.toFixed(2)}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm font-semibold text-blue-700 text-right border-r bg-blue-50">${currencySymbol}${artistStreamingConverted.toFixed(2)}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm font-semibold ${multiple >= 1 ? 'text-green-700' : 'text-red-700'} text-right border-r bg-green-50">${multiple >= 1 ? multiple.toFixed(1) + 'x more' : (1/multiple).toFixed(1) + 'x less'}</td>
                             </tr>
-                        `).join('')}
+                            `;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
         `;
         
-        // Insert table after the artists table
+        // Insert table after the artists table or in results
         const artistsTable = document.getElementById('topArtistsTable');
         if (artistsTable) {
             artistsTable.parentElement.insertBefore(tableContainer, artistsTable.nextSibling);
         } else {
-            this.output.parentElement.insertBefore(tableContainer, this.output.nextSibling);
+            this.results.appendChild(tableContainer);
         }
     }
 
@@ -1097,12 +1164,12 @@ class UIController {
             </div>
         `;
         
-        // Insert chart after the albums table
+        // Insert chart after the albums table or in results
         const albumsTable = document.getElementById('topAlbumsTable');
         if (albumsTable) {
             albumsTable.parentElement.insertBefore(chartContainer, albumsTable.nextSibling);
         } else {
-            this.output.parentElement.insertBefore(chartContainer, this.output.nextSibling);
+            this.results.appendChild(chartContainer);
         }
         
         // Create the chart
@@ -1251,25 +1318,132 @@ class UIController {
                 
                 <!-- Top Artist -->
                 <p class="text-xl text-gray-700 leading-relaxed">
-                    Your favourite artist, 
-                    <span class="inline-block bg-yellow-500 text-gray-900 font-bold px-3 py-1 rounded-lg text-xl mx-1">
+                    Your most played artist, <span class="inline-block bg-yellow-500 text-gray-900 font-bold px-3 py-1 rounded-lg text-xl mx-1">
                         ${this.escapeHtml(stats.topArtist)}
-                    </span>
-                    (${stats.topArtistPlays.toLocaleString()} plays), has earned somewhere between 
+                    </span>, has earned approximately
                     <span class="inline-block bg-orange-500 text-white font-bold px-2 py-1 rounded-lg mx-1">
-                        ${this.dataReader.getCurrencySymbol()}${stats.topArtistLow.toFixed(2)}
-                    </span>
-                    and
-                    <span class="inline-block bg-orange-500 text-white font-bold px-2 py-1 rounded-lg mx-1">
-                        ${this.dataReader.getCurrencySymbol()}${stats.topArtistHigh.toFixed(2)}
+                        ${this.dataReader.getCurrencySymbol()}${stats.topArtistEarnings.toFixed(2)}
                     </span>
                     from your streams.
+                </p>
+                
+                <!-- Total Artist Earnings -->
+                <p class="text-xl text-gray-700 leading-relaxed">
+                    Across all of your streams, artists have earned 
+                    <span class="inline-block bg-purple-500 text-white font-bold px-3 py-1 rounded-lg text-2xl mx-1">
+                        ${this.dataReader.getCurrencySymbol()}${stats.totalArtistEarnings.toFixed(2)}
+                    </span>.
                 </p>
             </div>
         `;
         
         // Insert hero at the top of results
         this.results.insertBefore(heroContainer, this.results.firstChild);
+    }
+
+    displayAlbumPurchaseAlternative() {
+        // Check if container already exists and remove it
+        const existingContainer = document.getElementById('albumPurchaseAlternative');
+        if (existingContainer) {
+            existingContainer.remove();
+        }
+
+        const data = this.dataReader.calculateAlbumPurchaseAlternative();
+        
+        // Create container
+        const container = document.createElement('div');
+        container.id = 'albumPurchaseAlternative';
+        container.className = 'mb-8 bg-gradient-to-br from-purple-50 to-pink-50 rounded-2xl p-8 border border-purple-200';
+        
+        container.innerHTML = `
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Album Purchase Alternative</h2>
+            
+            <p class="text-xl text-gray-700 leading-relaxed mb-4">
+                If you had bought every album you've listened to over 
+                <span class="inline-block bg-purple-500 text-white font-bold px-3 py-1 rounded-lg text-2xl mx-1">
+                    ${data.threshold}
+                </span>
+                times, you would own 
+                <span class="inline-block bg-pink-500 text-white font-bold px-3 py-1 rounded-lg text-2xl mx-1">
+                    ${data.albumCount}
+                </span>
+                albums, have spent 
+                <span class="inline-block bg-red-500 text-white font-bold px-3 py-1 rounded-lg text-2xl mx-1">
+                    ${this.dataReader.getCurrencySymbol()}${data.totalCost.toFixed(2)}
+                </span>
+                and paid artists 
+                <span class="inline-block bg-orange-500 text-white font-bold px-3 py-1 rounded-lg text-2xl mx-1">
+                    ${this.dataReader.getCurrencySymbol()}${data.artistEarnings.toFixed(2)}
+                </span>.
+            </p>
+        `;
+        
+        // Insert after the hero
+        const hero = document.getElementById('summaryHero');
+        if (hero && hero.nextSibling) {
+            this.results.insertBefore(container, hero.nextSibling);
+        } else if (hero) {
+            hero.after(container);
+        } else {
+            this.results.insertBefore(container, this.results.firstChild);
+        }
+        
+        // Add assumptions information section
+        this.displayAssumptions();
+    }
+
+    displayAssumptions() {
+        // Check if container already exists and remove it
+        const existingContainer = document.getElementById('assumptionsInfo');
+        if (existingContainer) {
+            existingContainer.remove();
+        }
+
+        // Create container
+        const container = document.createElement('div');
+        container.id = 'assumptionsInfo';
+        container.className = 'mb-8 bg-gradient-to-br from-gray-50 to-slate-50 rounded-2xl p-8 border border-gray-300';
+        
+        container.innerHTML = `
+            <h2 class="text-2xl font-bold text-gray-800 mb-4">Assumptions</h2>
+            
+            <div class="space-y-3 text-gray-700">
+                <p class="text-base leading-relaxed">
+                    <span class="font-semibold text-gray-800">Streaming payouts:</span> 
+                    Spotify pays approximately <span class="font-bold text-blue-600">$0.004 per stream</span> to rights holders (labels)
+                </p>
+                
+                <p class="text-base leading-relaxed">
+                    <span class="font-semibold text-gray-800">Artist streaming revenue:</span> 
+                    Artists receive approximately <span class="font-bold text-blue-600">20%</span> of streaming revenue from labels
+                </p>
+                
+                <p class="text-base leading-relaxed">
+                    <span class="font-semibold text-gray-800">Album purchase split:</span> 
+                    Labels receive <span class="font-bold text-green-600">80%</span> of album purchase revenue, 
+                    artists receive <span class="font-bold text-green-600">20%</span>
+                </p>
+                
+                <p class="text-base leading-relaxed">
+                    <span class="font-semibold text-gray-800">Album pricing:</span> 
+                    Average album price is <span class="font-bold text-purple-600">£10.00 GBP</span> or <span class="font-bold text-purple-600">$12.99 USD</span>
+                </p>
+                
+                <p class="text-sm text-gray-500 mt-4 pt-4 border-t border-gray-300">
+                    <em>Note: These are industry averages and can vary significantly based on contracts, distribution deals, and whether artists are independent or signed to labels.</em>
+                </p>
+            </div>
+        `;
+        
+        // Insert after the album purchase alternative
+        const albumPurchase = document.getElementById('albumPurchaseAlternative');
+        if (albumPurchase && albumPurchase.nextSibling) {
+            this.results.insertBefore(container, albumPurchase.nextSibling);
+        } else if (albumPurchase) {
+            albumPurchase.after(container);
+        } else {
+            this.results.appendChild(container);
+        }
     }
 
     escapeHtml(text) {
