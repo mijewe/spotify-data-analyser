@@ -1061,8 +1061,13 @@ class UIController {
         this.results.appendChild(tableContainer);
     }
 
-    displayTopAlbumsTable() {
-        const topAlbums = this.dataReader.getTopAlbums(10);
+    displayTopAlbumsTable(limit = null) {
+        // Get the limit from the stored preference or use default
+        if (limit === null) {
+            limit = parseInt(localStorage.getItem('spotify_albums_limit') || '10');
+        }
+        
+        const topAlbums = this.dataReader.getTopAlbums(limit);
         const currencySymbol = this.dataReader.getCurrencySymbol();
         const albumPrice = this.dataReader.currency === 'GBP' ? this.dataReader.albumPriceGBP : this.dataReader.albumPriceUSD;
         
@@ -1078,7 +1083,18 @@ class UIController {
         tableContainer.className = 'mt-6';
         
         tableContainer.innerHTML = `
-            <h3 class="text-xl font-semibold mb-4 text-gray-700">Top 10 Most Streamed Albums - Streaming vs Purchase Earnings</h3>
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-semibold text-gray-700">Top Albums - Streaming vs Purchase Earnings</h3>
+                <div class="flex items-center gap-2">
+                    <label for="albumsLimitSelect" class="text-sm font-medium text-gray-700">Show:</label>
+                    <select id="albumsLimitSelect" class="px-3 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="10" ${limit === 10 ? 'selected' : ''}>10</option>
+                        <option value="20" ${limit === 20 ? 'selected' : ''}>20</option>
+                        <option value="50" ${limit === 50 ? 'selected' : ''}>50</option>
+                        <option value="100" ${limit === 100 ? 'selected' : ''}>100</option>
+                    </select>
+                </div>
+            </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full bg-white border border-gray-200 rounded-lg overflow-hidden">
                     <thead class="bg-gray-100">
@@ -1137,6 +1153,16 @@ class UIController {
             artistsTable.parentElement.insertBefore(tableContainer, artistsTable.nextSibling);
         } else {
             this.results.appendChild(tableContainer);
+        }
+        
+        // Add event listener for the dropdown
+        const albumsLimitSelect = document.getElementById('albumsLimitSelect');
+        if (albumsLimitSelect) {
+            albumsLimitSelect.addEventListener('change', (e) => {
+                const newLimit = parseInt(e.target.value);
+                localStorage.setItem('spotify_albums_limit', newLimit);
+                this.displayTopAlbumsTable(newLimit);
+            });
         }
     }
 
