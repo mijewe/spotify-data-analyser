@@ -1145,6 +1145,9 @@ class UIController {
                     </tbody>
                 </table>
             </div>
+            <p class="mt-3 text-xs text-gray-500 italic">
+                * Purchase comparison assumes ${this.dataReader.currency === 'GBP' ? '£10' : '$12.99'} per album with 80% to label and 20% to artist
+            </p>
         `;
         
         // Insert table after the artists table or in results
